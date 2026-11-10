@@ -60,7 +60,9 @@ jobs:
           $deadline = (Get-Date).AddMinutes(8)
           do {
             Start-Sleep 5
-            $version = (Get-Item $env:EXE).VersionInfo.ProductVersion -replace '\.0$', ''
+            # The installer removes and rewrites the exe while it updates.
+            $item = Get-Item $env:EXE -ErrorAction SilentlyContinue
+            $version = if ($item) { $item.VersionInfo.ProductVersion -replace '\.0$', '' } else { 'installing' }
           } until ($version -eq $to -or (Get-Date) -gt $deadline)
           Get-Content "$env:RUNNER_TEMP\lf-update\logs\main.log"
           if ($version -ne $to) { throw "still $version after 8 minutes" }
