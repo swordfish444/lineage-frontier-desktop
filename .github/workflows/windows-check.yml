@@ -37,8 +37,6 @@ jobs:
           if ($version -ne $from) { throw "expected $from" }
           "EXE=$($exe.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter 'Lineage Frontier*.lnk' | ForEach-Object { "start menu: $($_.FullName)" }
-          reg query 'HKCU\Software\Classes\lineage-frontier' /s
-          if ($LASTEXITCODE -ne 0) { throw 'the lineage-frontier:// link is not registered' }
       - name: Open the game in the installed app
         shell: pwsh
         run: |
@@ -49,6 +47,9 @@ jobs:
           taskkill /PID $app.Id | Out-Null
           Start-Sleep 8
           Get-Content "$env:RUNNER_TEMP\lf-check\logs\main.log"
+          # The app registers lineage-frontier:// for the sign-in return when it starts (NSIS does not).
+          reg query 'HKCU\Software\Classes\lineage-frontier' /s
+          if ($LASTEXITCODE -ne 0) { throw 'the lineage-frontier:// link is not registered' }
       - name: Let the app update itself to the latest release
         shell: pwsh
         run: |
