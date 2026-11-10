@@ -1,0 +1,78 @@
+# Installs an older release on a fresh Windows runner, opens the game in the installed app, then lets the app update
+# itself to the latest release. Run by hand after publishing: Actions › Windows install and update check.
+name: Windows install and update check
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: Version to install first
+        default: '1.0.0'
+      to:
+        description: Version it must update itself to (the latest release)
+        default: '1.0.1'
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install the older release silently
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $from = '${{ inputs.from }}'
+          Invoke-WebRequest "https://github.com/${{ github.repository }}/releases/download/v$from/Lineage-Frontier-Setup-win-x64.exe" -OutFile setup.exe
+          $p = Start-Process .\setup.exe -ArgumentList '/S' -Wait -PassThru
+          "installer exit code $($p.ExitCode)"
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter 'Lineage Frontier.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'Lineage Frontier.exe was not installed' }
+          "installed $($exe.FullName), version $($exe.VersionInfo.ProductVersion)"
+          if ($exe.VersionInfo.ProductVersion -ne $from) { throw "expected $from" }
+          "EXE=$($exe.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter 'Lineage Frontier*.lnk' | ForEach-Object { "start menu: $($_.FullName)" }
+          reg query 'HKCU\Software\Classes\lineage-frontier' /s
+          if ($LASTEXITCODE -ne 0) { throw 'the lineage-frontier:// link is not registered' }
+      - name: Open the game in the installed app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:LINEAGE_FRONTIER_UPDATES = '0'
+          $app = Start-Process $env:EXE -ArgumentList "--profile-dir=$env:RUNNER_TEMP\lf-check",'--mute-audio','--background','--remote-debugging-port=9222' -PassThru
+          node windows-check.mjs 9222 "$env:RUNNER_TEMP\app-${{ inputs.from }}.png"
+          taskkill /PID $app.Id | Out-Null
+          Start-Sleep 8
+          Get-Content "$env:RUNNER_TEMP\lf-check\logs\main.log"
+      - name: Let the app update itself to the latest release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $to = '${{ inputs.to }}'
+          $env:LINEAGE_FRONTIER_UPDATE_RESTART = '1'
+          Start-Process $env:EXE -ArgumentList "--profile-dir=$env:RUNNER_TEMP\lf-update",'--mute-audio','--background' | Out-Null
+          $deadline = (Get-Date).AddMinutes(8)
+          do {
+            Start-Sleep 5
+            $version = (Get-Item $env:EXE).VersionInfo.ProductVersion
+          } until ($version -eq $to -or (Get-Date) -gt $deadline)
+          Get-Content "$env:RUNNER_TEMP\lf-update\logs\main.log"
+          if ($version -ne $to) { throw "still $version after 8 minutes" }
+          "updated to $version"
+          Start-Sleep 20
+          $running = Get-Process 'Lineage Frontier' -ErrorAction SilentlyContinue
+          "running after the update: $($running.Count) process(es)"
+          if (-not $running) { throw 'the app did not start again after updating' }
+          $log = "$env:APPDATA\Lineage Frontier\logs\main.log"
+          if (Test-Path $log) { Get-Content $log -Tail 20 }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-check
+          path: |
+            ${{ runner.temp }}/*.png
+            ${{ runner.temp }}/lf-check/logs/*.log
+            ${{ runner.temp }}/lf-update/logs/*.log
