@@ -31,8 +31,10 @@ jobs:
           "installer exit code $($p.ExitCode)"
           $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter 'Lineage Frontier.exe' | Select-Object -First 1
           if (-not $exe) { throw 'Lineage Frontier.exe was not installed' }
-          "installed $($exe.FullName), version $($exe.VersionInfo.ProductVersion)"
-          if ($exe.VersionInfo.ProductVersion -ne $from) { throw "expected $from" }
+          # Windows file versions have four parts (1.0.0.0).
+          $version = $exe.VersionInfo.ProductVersion -replace '\.0$', ''
+          "installed $($exe.FullName), version $version"
+          if ($version -ne $from) { throw "expected $from" }
           "EXE=$($exe.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter 'Lineage Frontier*.lnk' | ForEach-Object { "start menu: $($_.FullName)" }
           reg query 'HKCU\Software\Classes\lineage-frontier' /s
@@ -57,7 +59,7 @@ jobs:
           $deadline = (Get-Date).AddMinutes(8)
           do {
             Start-Sleep 5
-            $version = (Get-Item $env:EXE).VersionInfo.ProductVersion
+            $version = (Get-Item $env:EXE).VersionInfo.ProductVersion -replace '\.0$', ''
           } until ($version -eq $to -or (Get-Date) -gt $deadline)
           Get-Content "$env:RUNNER_TEMP\lf-update\logs\main.log"
           if ($version -ne $to) { throw "still $version after 8 minutes" }
